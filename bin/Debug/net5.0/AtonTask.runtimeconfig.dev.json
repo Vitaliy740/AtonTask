@@ -1,0 +1,8 @@
+{
+  "runtimeOptions": {
+    "additionalProbingPaths": [
+      "C:\\Users\\alkap\\.dotnet\\store\\|arch|\\|tfm|",
+      "C:\\Users\\alkap\\.nuget\\packages"
+    ]
+  }
+}
