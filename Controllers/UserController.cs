@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using AtonTask.DTOs;
 using Microsoft.AspNetCore.Authorization;
+using System.ComponentModel.DataAnnotations;
 
 namespace AtonTask.Controllers
 {
@@ -37,16 +38,16 @@ namespace AtonTask.Controllers
         /// <param name="requesterLogin"></param>
         /// <param name="requesterPassword"></param>
         /// <returns></returns>
-        [HttpGet]
+        [HttpGet("Get All Users")]
         public async Task<ActionResult<IEnumerable<User>>> GetUsers(string requesterLogin, string requesterPassword)
         {
             if (_dbContext.Users == null) 
             {   
-                return NotFound();
+                return NotFound("Database context is not available.");
             }
             if (!CheckCredentials(requesterLogin, requesterPassword, out User requester) || !IsAuthorized(requester, true))
             {
-                return Unauthorized();
+                return Unauthorized("You entered wrong password, or Login, or you are not Admin");
             }
             return await _dbContext.Users.Where(x => x.RevokedOn==DateTime.MinValue).OrderBy(x=>x.CreatedOn).ToArrayAsync();
         }
@@ -58,17 +59,17 @@ namespace AtonTask.Controllers
         /// <param name="requesterPassword"></param>
         /// <param name="login"></param>
         /// <returns></returns>
-        [HttpGet("{login}")]
+        [HttpGet("Get user by login: {login}")]
         public async Task<ActionResult> GetUserByLogin(string requesterLogin,string requesterPassword, string login)
         {
             if (_dbContext.Users == null)
             {
-                return NotFound();
+                return NotFound("Database context is not available.");
             }
 
             if (!CheckCredentials(requesterLogin, requesterPassword, out User requester) || !IsAuthorized(requester, true))
             {
-                return Unauthorized();
+                return Unauthorized("You entered wrong password, or Login, or you are not Admin");
             }
 
             var user = await _dbContext.Users.FirstOrDefaultAsync(x=>x.Login==login);
@@ -77,7 +78,7 @@ namespace AtonTask.Controllers
                 return NotFound("No user With Login {login} found");
             }
 
-            return Ok( new { user.Name, user.Gender, user.BirthDay,isActive=(user.RevokedOn!=DateTime.MinValue)});
+            return Ok( new { user.Name,user.Gender, user.BirthDay,isActive=(user.RevokedOn!=DateTime.MinValue)});
         }
         /// <summary>
         /// Create
@@ -88,59 +89,80 @@ namespace AtonTask.Controllers
         /// <param name="requesterPassword"></param>
         /// <param name="user"></param>
         /// <returns></returns>
-        [HttpPost]
+        [HttpPost("Create user")]
         public async Task<ActionResult<User>> Create(string requesterLogin, string requesterPassword, [FromForm] UserCreationData user) 
         {
             if (_dbContext.Users == null)
             {
-                return NotFound();
+                return NotFound("Database context is not available.");
             }
             if (!CheckCredentials(requesterLogin, requesterPassword, out User requester) || !IsAuthorized(requester, true))
             {
-                return Unauthorized();
+                return Unauthorized("You entered wrong password, or Login, or you are not Admin");
             }
             bool userAlreadyExist = await _dbContext.Users.AnyAsync(x=>x.Login==user.NewLogin);
             if (userAlreadyExist) 
             {
-                return BadRequest();
+                return BadRequest("Login {user.Login} is already taken");
             }
-            User newUser = new User()
+            try
             {
-                Guid = Guid.NewGuid(),
+                User newUser = new User()
+                {
+                    Guid = Guid.NewGuid(),
 
-                Login = user.NewLogin,
-                Password = user.NewPassword,
-                Name = user.NewName,
-                Gender = (int)Enum.Parse(typeof(GenderType), user.NewGender.ToString()),
-                BirthDay = user.NewBirthDate,
-                Admin = user.Admin,
-                CreatedOn = DateTime.UtcNow,
-                CreatedBy = requesterLogin,
-                RevokedOn = DateTime.MinValue,
-                RevokedBy = ""
-                
-            };
+                    Login = user.NewLogin,
+                    Password = user.NewPassword,
+                    Name = user.NewName,
+                    Gender = (int)Enum.Parse(typeof(GenderType), user.NewGender.ToString()),
+                    BirthDay = user.NewBirthDate,
+                    Admin = user.Admin,
+                    CreatedOn = DateTime.UtcNow,
+                    CreatedBy = requesterLogin,
+                    RevokedOn = DateTime.MinValue,
+                    RevokedBy = ""
 
-            _dbContext.Users.Add(newUser);
-            await _dbContext.SaveChangesAsync();
-            return CreatedAtAction(nameof(GetUserByLogin), new { login = user.NewLogin },user);
+                };
+                _dbContext.Users.Add(newUser);
+                await _dbContext.SaveChangesAsync();
+                return CreatedAtAction(nameof(GetUserByLogin), new { login = user.NewLogin }, user);
+            }
+            catch (Exception ex) 
+            {
+                return BadRequest(ex.Message);
+            }
+
+
         }
-
-        [HttpPut]
+        /// <summary>
+        /// Update-1
+        ///2) Изменение имени, пола или даты рождения пользователя(Может менять Администратор, либо
+        ///лично пользователь, если он активен (отсутствует RevokedOn))
+        ///3) Изменение пароля(Пароль может менять либо Администратор, либо лично пользователь, если
+        ///он активен (отсутствует RevokedOn))
+        ///4) Изменение логина(Логин может менять либо Администратор, либо лично пользователь, если
+        ///он активен (отсутствует RevokedOn), логин должен оставаться уникальным)
+        /// </summary>
+        /// <param name="requesterLogin"></param>
+        /// <param name="requesterPassword"></param>
+        /// <param name="login"></param>
+        /// <param name="userUpdate"></param>
+        /// <returns></returns>
+        [HttpPut("Update user 1")]
         public async Task<IActionResult> UpdateOne(string requesterLogin, string requesterPassword, string login, [FromForm] UserUpdateData userUpdate)
         {
             if (_dbContext.Users == null)
             {
-                return NotFound();
+                return NotFound("Database context is not available.");
             }
             if (!CheckCredentials(requesterLogin, requesterPassword, out User requester) || !IsAuthorized(requester))
             {
-                return Unauthorized();
+                return Unauthorized("You entered wrong password, or Login, or you are not Admin");
             }
             var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Login == login);
             if (user == null)
             {
-                return NotFound();
+                return NotFound("User you trying to access is not exist");
             }
             if (! requester.Admin && requester.Login!=login) 
             {
@@ -152,7 +174,7 @@ namespace AtonTask.Controllers
             user.Password = string.IsNullOrEmpty(userUpdate.NewPassword) ? user.Password : userUpdate.NewPassword;
             if (!string.IsNullOrEmpty(userUpdate.NewLogin) && userUpdate.NewLogin != user.Login)
             {
-                if (await IsLoginUnique(userUpdate.NewLogin))
+                if (!await IsLoginUnique(userUpdate.NewLogin))
                 {
                     return BadRequest("The new login is already taken.");
                 }
@@ -187,29 +209,45 @@ namespace AtonTask.Controllers
         /// <param name="requesterPassword"></param>
         /// <param name="login"></param>
         /// <returns></returns>
-        [HttpPut("{login}")]
+        [HttpPut("Restore user with login: {login}")]
         public async Task<IActionResult> UpdateTwo(string requesterLogin, string requesterPassword,string login) 
         {
             if (_dbContext.Users == null)
             {
-                return NotFound();
+                return NotFound("Database context is not available.");
             }
             if (!CheckCredentials(requesterLogin, requesterPassword, out User requester) || !IsAuthorized(requester, true))
             {
-                return Unauthorized();
+                return Unauthorized("You entered wrong password, or Login, or you are not Admin");
             }
             var user = await _dbContext.Users.FirstAsync(x => x.Login == login);
             if (user == null) 
             {
-                return NotFound();
+                return NotFound("User you trying to access is not exist");
             }
             if (user.RevokedOn == DateTime.MinValue) 
             {
-                return BadRequest();
+                return BadRequest("User is not revoked and does not require restoration");
             }
             user.RevokedOn = DateTime.MinValue;
             user.RevokedBy = "";
-            return Ok();
+            _dbContext.Entry(user).State = EntityState.Modified;
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!await UserAvailable(user.Guid))
+                {
+                    return NotFound("User not found.");
+                }
+                else
+                {
+                    throw;
+                }
+            }
+            return Ok("User has been restored from soft delete");
         }
         /// <summary>
         /// Delete
@@ -221,39 +259,57 @@ namespace AtonTask.Controllers
         /// <param name="hardDelete"></param>
         /// <param name="login"></param>
         /// <returns></returns>
-        [HttpDelete("{login}")]
-        public async Task<IActionResult> Delete(string requesterLogin, string requesterPassword, bool hardDelete, string login)
+        [HttpDelete("Delete user(soft/hard){login}")]
+        public async Task<IActionResult> Delete(string requesterLogin, string requesterPassword, [Required]bool hardDelete, string login)
         {
             if (_dbContext.Users == null)
             {
-                return NotFound();
+                return NotFound("Database context is not available.");
             }
             if (!CheckCredentials(requesterLogin, requesterPassword, out User requester) || !IsAuthorized(requester, true))
             {
                 return Unauthorized();
             }
             var user = await _dbContext.Users.FirstAsync(x => x.Login == login);
-            if (user == null) return NotFound();
+            if (user == null) return NotFound("User you trying to delete is not exist");
             if (hardDelete)
             {
                 _dbContext.Users.Remove(user);
                 await _dbContext.SaveChangesAsync();
                 return Ok();
             }
-
-            user.RevokedBy = requesterLogin;
-            user.RevokedOn = DateTime.UtcNow;
-            return Ok();
-
+            if (user.RevokedOn == DateTime.MinValue)
+            {
+                user.RevokedBy = requesterLogin;
+                user.RevokedOn = DateTime.UtcNow;
+                _dbContext.Entry(user).State = EntityState.Modified;
+                try
+                {
+                    await _dbContext.SaveChangesAsync();
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    if (!await UserAvailable(user.Guid))
+                    {
+                        return NotFound("User not found.");
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+                return Ok("User has been revoked");
+            }
+            return BadRequest("User is already revoked");
         }
         private async Task<bool> UserAvailable(Guid guid) 
         {
             return await (_dbContext.Users?.AnyAsync(x => x.Guid == guid) ?? Task.FromResult(false));
         }
-        private async Task<bool> IsLoginUnique(string login, Guid? currentUserId = null)
+        private async Task<bool> IsLoginUnique(string login)
         {
             // Исключите текущего пользователя из проверки, если это обновление его данных
-            return !await _dbContext.Users.AnyAsync(u => u.Login == login && (currentUserId == null || u.Guid != currentUserId));
+            return !await _dbContext.Users.AnyAsync(u => u.Login == login );
         }
     }
 }

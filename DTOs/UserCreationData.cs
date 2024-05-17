@@ -17,8 +17,10 @@ namespace AtonTask.DTOs
         [Required]
         [RegularExpression("^[a-zA-Zа-яА-Я]*$", ErrorMessage = "Name can only contain english and russian letters.")]
         public string NewName { get; set; }
+        [Required]
         public GenderType NewGender { get; set; }
         public DateTime? NewBirthDate { get; set; }
+        [Required]
         public bool Admin { get; set; }
     }
     public enum GenderType 
